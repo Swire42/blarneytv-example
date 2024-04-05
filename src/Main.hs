@@ -1,5 +1,6 @@
 import Blarney
 import qualified Blarney.Vector as V
+import qualified Blarney.SList as SL
 import Blarney.Retime
 import System.Environment
 import Data.List
@@ -109,7 +110,21 @@ adderSeqN n = rowSeqPeriod n fullAdder'
 
 -- N-bit sequential adder
 adderSeqUnroll :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
-adderSeqUnroll a b = V.vecBitToBitN $ (unroll' $ adderSeqN (valueOf @n)) $ V.zip (V.bitNToVecBit a) (V.bitNToVecBit b)
+adderSeqUnroll a b = unsep $ (unroll' $ adderSeqN (valueOf @n)) $ V.zip (sep a) (sep b)
+  where
+    sep :: KnownNat n => Bit n -> V.Vec n (Bit 1)
+    sep = V.fromList . toBitList
+    unsep :: KnownNat n => V.Vec n (Bit 1) -> Bit n
+    unsep = fromBitList . V.toList
+
+-- N-bit sequential adder
+adderSeqUnroll'' :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
+adderSeqUnroll'' a b = unsep $ (unroll'' $ adderSeqN (valueOf @n)) $ SL.zip (sep a) (sep b)
+  where
+    sep :: KnownNat n => Bit n -> SL.SList n (Bit 1)
+    sep = SL.fromList . toBitList
+    unsep :: KnownNat n => SL.SList n (Bit 1) -> Bit n
+    unsep = fromBitList . SL.toList
 
 replace pos newVal list = take pos list ++ newVal : drop (pos+1) list
 
@@ -120,11 +135,11 @@ main :: IO ()
 main = do
   verifyWith cnf (\x y -> assert (adder @16 x y === x + y) "adder === +")
   verifyWith cnf (\x y -> assert (adderSeqUnroll @64 x y === x + y) "adderSeqUnroll === +")
-  verifyWith cnf (\x -> assert (adderSeqUnrollSlowdown 2 7 4 x === adderSeqN 2 x) "unroll . slowdown")
+  verifyWith cnf (\x y -> assert (adderSeqUnroll'' @64 x y === x + y) "adderSeqUnroll'' === +")
   verifyWith cnf (\x -> assert ((V.head $ f x) === 1) "unroll . slowdown === map // head")
   verifyWith cnf (\x -> assert ((V.last $ f x) === 1) "unroll . slowdown === map // last")
   verifyWith cnf (\x -> assert ((V.head $ f x, V.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last") -- why more induction depth???
   --verifyWith cnf (\x -> assert (andList . V.toList $ test x) "unroll . slowdown === map // whole")
   where
     cnf = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
-    f x = V.zipWith (===) (adderSeqUnrollSlowdown' @2 2 x) (V.map (adderSeqN 2) x)
+    f x = V.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (V.map (adderSeqN 2) x)
