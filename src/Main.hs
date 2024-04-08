@@ -1,11 +1,10 @@
 import Blarney
-import qualified Blarney.Vector as V
-import qualified Blarney.SList as SL
+import qualified Blarney.SList as SList
+import qualified Blarney.SVec as SVec
 import Blarney.Retime
 import System.Environment
-import Data.List
-  ( isPrefixOf
-  )
+
+import Control.Arrow ((***))
 
 -- | Half adder taking two bits and returning a tuple with the carry bit first
 --   and the sum second
@@ -110,36 +109,20 @@ adderSeqN n = rowSeqPeriod n fullAdder'
 
 -- N-bit sequential adder
 adderSeqUnroll :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
-adderSeqUnroll a b = unsep $ (unroll' $ adderSeqN (valueOf @n)) $ V.zip (sep a) (sep b)
-  where
-    sep :: KnownNat n => Bit n -> V.Vec n (Bit 1)
-    sep = V.fromList . toBitList
-    unsep :: KnownNat n => V.Vec n (Bit 1) -> Bit n
-    unsep = fromBitList . V.toList
-
--- N-bit sequential adder
-adderSeqUnroll'' :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
-adderSeqUnroll'' a b = unsep $ (unroll'' $ adderSeqN (valueOf @n)) $ SL.zip (sep a) (sep b)
-  where
-    sep :: KnownNat n => Bit n -> SL.SList n (Bit 1)
-    sep = SL.fromList . toBitList
-    unsep :: KnownNat n => SL.SList n (Bit 1) -> Bit n
-    unsep = fromBitList . SL.toList
+adderSeqUnroll a b = SVec.transposeVBit $ (unrollS $ adderSeqN (valueOf @n)) $ SVec.zip (SVec.transposeBitV a) (SVec.transposeBitV b)
 
 replace pos newVal list = take pos list ++ newVal : drop (pos+1) list
 
-adderSeqUnrollSlowdown :: forall m. KnownNat m => Int -> V.Vec m (Bit 1, Bit 1) -> V.Vec m (Bit 1)
-adderSeqUnrollSlowdown n = unroll' $ slowdown (valueOf @m) $ adderSeqN n
+adderSeqUnrollSlowdown :: forall m. KnownNat m => Int -> SVec.SVec m (Bit 1, Bit 1) -> SVec.SVec m (Bit 1)
+adderSeqUnrollSlowdown n = unrollS $ slowdown (valueOf @m) $ adderSeqN n
 
 main :: IO ()
 main = do
   verifyWith cnf (\x y -> assert (adder @16 x y === x + y) "adder === +")
-  verifyWith cnf (\x y -> assert (adderSeqUnroll @64 x y === x + y) "adderSeqUnroll === +")
-  verifyWith cnf (\x y -> assert (adderSeqUnroll'' @64 x y === x + y) "adderSeqUnroll'' === +")
-  verifyWith cnf (\x -> assert ((V.head $ f x) === 1) "unroll . slowdown === map // head")
-  verifyWith cnf (\x -> assert ((V.last $ f x) === 1) "unroll . slowdown === map // last")
-  verifyWith cnf (\x -> assert ((V.head $ f x, V.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last") -- why more induction depth???
-  --verifyWith cnf (\x -> assert (andList . V.toList $ test x) "unroll . slowdown === map // whole")
+  verifyWith cnf (\x y -> assert (adderSeqUnroll @64 x y === x + y) "adderSequnrollS === +")
+  verifyWith cnf (\x -> assert ((SVec.head $ f x) === 1) "unroll . slowdown === map // head")
+  verifyWith cnf (\x -> assert ((SVec.last $ f x) === 1) "unroll . slowdown === map // last")
+  --verifyWith cnf (\x -> assert ((SVec.head $ f x, SVec.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last") -- why more induction depth???
   where
     cnf = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
-    f x = V.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (V.map (adderSeqN 2) x)
+    f x = SVec.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (SVec.map (adderSeqN 2) x)
