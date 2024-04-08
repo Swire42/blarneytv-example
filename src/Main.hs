@@ -2,6 +2,7 @@ import Blarney
 import qualified Blarney.SList as SList
 import qualified Blarney.SVec as SVec
 import Blarney.Retime
+import Blarney.ITranspose
 import System.Environment
 
 import Control.Arrow ((***))
@@ -109,7 +110,7 @@ adderSeqN n = rowSeqPeriod n fullAdder'
 
 -- N-bit sequential adder
 adderSeqUnroll :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
-adderSeqUnroll a b = SVec.transposeVBit $ (unrollS $ adderSeqN (valueOf @n)) $ SVec.zip (SVec.transposeBitV a) (SVec.transposeBitV b)
+adderSeqUnroll a b = itranspose $ (unrollS @n $ adderSeqN (valueOf @n)) $ SVec.zip (itranspose a) (itranspose b)
 
 replace pos newVal list = take pos list ++ newVal : drop (pos+1) list
 
