@@ -1,9 +1,12 @@
+import System.Directory
+import System.Environment
+
 import Blarney
 import qualified Blarney.SList as SList
 import qualified Blarney.SVec as SVec
+import qualified Blarney.TVec as TVec
 import Blarney.Retime
 import Blarney.ITranspose
-import System.Environment
 
 import Control.Arrow ((***))
 
@@ -109,21 +112,72 @@ adderSeqN :: Int -> (Bit 1, Bit 1) -> Bit 1
 adderSeqN n = rowSeqPeriod n fullAdder'
 
 -- N-bit sequential adder
-adderSeqUnroll :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
-adderSeqUnroll a b = itranspose $ (unrollS @n $ adderSeqN (valueOf @n)) $ SVec.zip (itranspose a) (itranspose b)
+adderSeqUnroll :: forall n. KnownNat n => SVec.SVec n (Bit 1) -> SVec.SVec n (Bit 1) -> SVec.SVec n (Bit 1)
+adderSeqUnroll a b = (unrollS @n $ adderSeqN (valueOf @n)) $ SVec.zip a b
+
+adderSeqUnrollBit :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
+adderSeqUnrollBit a b = itranspose $ adderSeqUnroll @n (itranspose a) (itranspose b)
 
 replace pos newVal list = take pos list ++ newVal : drop (pos+1) list
 
 adderSeqUnrollSlowdown :: forall m. KnownNat m => Int -> SVec.SVec m (Bit 1, Bit 1) -> SVec.SVec m (Bit 1)
 adderSeqUnrollSlowdown n = unrollS $ slowdown (valueOf @m) $ adderSeqN n
 
+test1 :: Bit 1 -> Bit 1 -> Bit 1
+test1 a0 b0 = s0
+  where
+    (c1, s0) = fullAdder a0 b0 c0
+    c0 = 0
+
+test2 :: Bit 2 -> Bit 2 -> Bit 2
+test2 a b = fromBitList [s0, s1]
+  where
+    [a0, a1] = toBitList a
+    [b0, b1] = toBitList b
+    (c1, s0) = fullAdder a0 b0 c0
+    (c2, s1) = fullAdder a1 b1 c1
+    c0 = 0
+
+notId :: Bit 1 -> Bit 1
+notId x = s
+  where
+    s = x .^. c
+    p = delay 0 $ delay 1 p
+    c = delay 0 (p .&. s)
+
+adderSeqTVec :: forall n. (KnownNat n, 1 <= n) => TVec.TVec n (Bit 1) -> TVec.TVec n (Bit 1) -> TVec.TVec n (Bit 1)
+adderSeqTVec a b = fst $ TVec.unzip $ TVec.scanReset (\(_, cIn) (a, b) -> fullAdder' (cIn, (a, b))) (TVec.replicate (0, 0)) $ TVec.zip a b
+
+adderSeqTVecBitDelay :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
+adderSeqTVecBitDelay a b = itranspose . TVec.collect (SVec.replicate 0) $ adderSeqTVec @n (TVec.sweep $ itranspose a) (TVec.sweep $ itranspose b)
+
 main :: IO ()
 main = do
-  verifyWith cnf (\x y -> assert (adder @16 x y === x + y) "adder === +")
-  verifyWith cnf (\x y -> assert (adderSeqUnroll @64 x y === x + y) "adderSequnrollS === +")
-  verifyWith cnf (\x -> assert ((SVec.head $ f x) === 1) "unroll . slowdown === map // head")
-  verifyWith cnf (\x -> assert ((SVec.last $ f x) === 1) "unroll . slowdown === map // last")
-  --verifyWith cnf (\x -> assert ((SVec.head $ f x, SVec.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last") -- why more induction depth???
+  -- path to script output directory
+  cwd <- getCurrentDirectory
+  let smtDir = cwd ++ "/Check/"
+  -- generate smt2 scripts
+  --writeSMTScript cnfWrite (\x -> assert ((notId x) === x) "notId === id") "prop" smtDir
+  --writeSMTScript cnfWrite (\x y -> assert (((delay 0 $ adderSeqUnrollBit @2 x y) === (delay 0 $ x + y))) "Inner") "inner" smtDir
+
+  verifyWith cnfEasy (\x -> assert ((notId x) === x) "notId === id")
+  verifyWith cnfEasy (\x y -> assert (adder @16 x y === x + y) "adder === +")
+  verifyWith cnfEasy (\x y -> assert (adderSeqUnrollBit @16 x y === x + y) "adderSeqUnrollBit === +")
+  verifyWith cnfEasy (\x y -> assert (adderSeqTVecBitDelay @2 x y === adderSeqTVecBitDelay @2 x y) "adderSeqUnrollBit === +")
+  verifyWith cnfEasy (\x y -> assert ((test2 x y) === (x + y)) "test2: no delays")
+  verifyWith cnfEasy (\x y -> assert (delay 1 ((test2 x y) === (x + y))) "test2: outer delay")
+  verifyWith cnfEasy (\x y -> assert (((delay 0 (test2 x y)) === (delay 0 (x + y)))) "test2: inner delays")
+  verifyWith cnfEasy (\x y -> assert ((adderSeqUnrollBit @2 x y) === (x + y)) "asu: no delays")
+  verifyWith cnfEasy (\x y -> assert (delay 1 ((adderSeqUnrollBit @2 x y) === (x + y))) "asu: outer delay")
+  verifyWith cnfHard (\x y -> assert ((delay 0 (adderSeqUnrollBit @2 x y)) === (delay 0 (x + y))) "asu: inner delays (too hard)")
+  verifyWith cnfEasy (\x y -> assert ((adderSeqUnrollBit @2 x y) === (x + y)) "asu === +")
+  verifyWith cnfEasy (\x y -> assert ((delay 0 $ x + y) === adderSeqTVecBitDelay @2 x y) "d.+ === astv")
+  verifyWith cnfHard (\x y -> assert ((delay 0 $ adderSeqUnrollBit @2 x y) === adderSeqTVecBitDelay @2 x y) "d.asu === astv (too hard)")
+  verifyWith cnfEasy (\x -> assert ((SVec.head $ f x) === 1) "unroll . slowdown === map // head")
+  verifyWith cnfEasy (\x -> assert ((SVec.last $ f x) === 1) "unroll . slowdown === map // last")
+  verifyWith cnfHard (\x -> assert ((SVec.head $ f x, SVec.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last (too hard)")
   where
-    cnf = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
+    cnfEasy = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
+    cnfHard = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = True, userConfIncreasePeriod = 4 } }
+    cnfWrite = dfltVerifyConf { verifyConfMode = Induction (fixedDepth 2) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
     f x = SVec.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (SVec.map (adderSeqN 2) x)
