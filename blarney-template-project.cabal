@@ -13,6 +13,7 @@ executable blarney-template-project
   build-depends:
       base
     , blarney
+    , directory
   default-language: GHC2021
   default-extensions:
     BlockArguments
