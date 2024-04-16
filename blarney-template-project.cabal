@@ -14,6 +14,7 @@ executable blarney-template-project
       base
     , blarney
     , directory
+    , containers
   default-language: GHC2021
   default-extensions:
     BlockArguments

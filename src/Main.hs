@@ -3,12 +3,21 @@ import System.Environment
 
 import Blarney
 import qualified Blarney.SList as SList
-import qualified Blarney.SVec as SVec
+import qualified Blarney.SVec as V
 import qualified Blarney.TVec as TVec
+import qualified Blarney.Batch as B
+import qualified Blarney.FakeRapid as R
 import Blarney.Retime
 import Blarney.ITranspose
 
 import Control.Arrow ((***))
+
+import Data.IntMap.Lazy (IntMap)
+import qualified Data.IntMap.Lazy as IntMap
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IntSet
+
+type Vec = V.SVec
 
 -- | Half adder taking two bits and returning a tuple with the carry bit first
 --   and the sum second
@@ -28,6 +37,10 @@ fullAdder a b cIn = (cOut, s1)
 
 fullAdder' :: (Bit 1, (Bit 1, Bit 1)) -> (Bit 1, Bit 1)
 fullAdder' (cIn, (a, b)) = (sum, cOut)
+  where (cOut, sum) = fullAdder a b cIn
+
+fullAdder'' :: Bit 1 -> (Bit 1, Bit 1) -> (Bit 1, Bit 1)
+fullAdder'' cIn (a, b) = (cOut, sum)
   where (cOut, sum) = fullAdder a b cIn
 
 -- | Bit-list adder
@@ -112,16 +125,16 @@ adderSeqN :: Int -> (Bit 1, Bit 1) -> Bit 1
 adderSeqN n = rowSeqPeriod n fullAdder'
 
 -- N-bit sequential adder
-adderSeqUnroll :: forall n. KnownNat n => SVec.SVec n (Bit 1) -> SVec.SVec n (Bit 1) -> SVec.SVec n (Bit 1)
-adderSeqUnroll a b = (unrollS @n $ adderSeqN (valueOf @n)) $ SVec.zip a b
+adderSeqUnroll :: forall n. KnownNat n => Vec n (Bit 1) -> Vec n (Bit 1) -> Vec n (Bit 1)
+adderSeqUnroll a b = (V.unroll @n $ adderSeqN (valueOf @n)) $ V.zip a b
 
 adderSeqUnrollBit :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
 adderSeqUnrollBit a b = itranspose $ adderSeqUnroll @n (itranspose a) (itranspose b)
 
 replace pos newVal list = take pos list ++ newVal : drop (pos+1) list
 
-adderSeqUnrollSlowdown :: forall m. KnownNat m => Int -> SVec.SVec m (Bit 1, Bit 1) -> SVec.SVec m (Bit 1)
-adderSeqUnrollSlowdown n = unrollS $ slowdown (valueOf @m) $ adderSeqN n
+adderSeqUnrollSlowdown :: forall m. KnownNat m => Int -> Vec m (Bit 1, Bit 1) -> Vec m (Bit 1)
+adderSeqUnrollSlowdown n = V.unroll $ slowdown (valueOf @m) $ adderSeqN n
 
 test1 :: Bit 1 -> Bit 1 -> Bit 1
 test1 a0 b0 = s0
@@ -148,8 +161,42 @@ notId x = s
 adderSeqTVec :: forall n. (KnownNat n, 1 <= n) => TVec.TVec n (Bit 1) -> TVec.TVec n (Bit 1) -> TVec.TVec n (Bit 1)
 adderSeqTVec a b = fst $ TVec.unzip $ TVec.scanReset (\(_, cIn) (a, b) -> fullAdder' (cIn, (a, b))) (TVec.replicate (0, 0)) $ TVec.zip a b
 
-adderSeqTVecBitDelay :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
-adderSeqTVecBitDelay a b = itranspose . TVec.collect (SVec.replicate 0) $ adderSeqTVec @n (TVec.sweep $ itranspose a) (TVec.sweep $ itranspose b)
+adderDelaySeqTVecBit :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
+adderDelaySeqTVecBit a b = itranspose . TVec.collect (V.replicate 0) $ adderSeqTVec @n (TVec.sweep $ itranspose a) (TVec.sweep $ itranspose b)
+
+-----
+
+adderBatch :: (KnownNat n, 1 <= n) => B.Batch n (Bit 1, Bit 1) -> B.Batch n (Bit 1)
+adderBatch = B.scanReset fullAdder'' (B.wrap 0)
+
+adderBatchUnroll :: forall n. (KnownNat n, 1 <= n) => Vec n (Bit 1) -> Vec n (Bit 1) -> Vec n (Bit 1)
+adderBatchUnroll a b = B.unroll adderBatch (V.zip a b)
+
+adderBatchUnrollBit :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
+adderBatchUnrollBit a b = itranspose $ adderBatchUnroll @n (itranspose a) (itranspose b)
+
+adderDelayRapid :: forall n. (KnownNat n, 1 <= n) => Vec n (Bit 1) -> Vec n (Bit 1) -> Vec n (Bit 1)
+adderDelayRapid a b = R.collect zero $ R.clkMul (adderBatch @n) (R.sweep $ V.zip a b)
+
+adderDelayRapidBit :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
+adderDelayRapidBit a b = itranspose $ adderDelayRapid @n (itranspose a) (itranspose b)
+
+stateSize :: (Bits a, Bits b, KnownNat (SizeOf a)) => (a -> b) -> Int
+stateSize circ = sum $ fix $ aux rootBV IntSet.empty
+ where
+  rootBV :: BV = toBV . pack $ circ $ unpack zero
+  rootID = bvInstId rootBV
+
+  aux :: BV -> IntSet -> IntMap Int -> IntMap Int
+  aux BV{bvPrim=prim, bvInputs=inputs, bvInstId=instId} iset imap =
+    if instId `IntSet.member` iset
+      then IntMap.empty
+      else
+        IntMap.unions $ IntMap.singleton instId (
+          case prim of
+            Register initVal w -> w
+            _ -> 0
+        ) : map (\x -> aux x (IntSet.insert instId iset) imap) inputs
 
 main :: IO ()
 main = do
@@ -163,7 +210,9 @@ main = do
   verifyWith cnfEasy (\x -> assert ((notId x) === x) "notId === id")
   verifyWith cnfEasy (\x y -> assert (adder @16 x y === x + y) "adder === +")
   verifyWith cnfEasy (\x y -> assert (adderSeqUnrollBit @16 x y === x + y) "adderSeqUnrollBit === +")
-  verifyWith cnfEasy (\x y -> assert (adderSeqTVecBitDelay @2 x y === adderSeqTVecBitDelay @2 x y) "adderSeqUnrollBit === +")
+  verifyWith cnfEasy (\x y -> assert (adderDelaySeqTVecBit @2 x y === (delay 0 (x + y))) "adderDelaySeqTVecBit === delay . +")
+  verifyWith cnfEasy (\x y -> assert (adderBatchUnrollBit @16 x y === x + y) "adderBatchUnrollBit === +")
+  verifyWith cnfHard (\x y -> assert (adderDelayRapidBit @2 x y === (delay 0 (x + y))) "adderDelayRapidBit === + (too hard)")
   verifyWith cnfEasy (\x y -> assert ((test2 x y) === (x + y)) "test2: no delays")
   verifyWith cnfEasy (\x y -> assert (delay 1 ((test2 x y) === (x + y))) "test2: outer delay")
   verifyWith cnfEasy (\x y -> assert (((delay 0 (test2 x y)) === (delay 0 (x + y)))) "test2: inner delays")
@@ -171,13 +220,13 @@ main = do
   verifyWith cnfEasy (\x y -> assert (delay 1 ((adderSeqUnrollBit @2 x y) === (x + y))) "asu: outer delay")
   verifyWith cnfHard (\x y -> assert ((delay 0 (adderSeqUnrollBit @2 x y)) === (delay 0 (x + y))) "asu: inner delays (too hard)")
   verifyWith cnfEasy (\x y -> assert ((adderSeqUnrollBit @2 x y) === (x + y)) "asu === +")
-  verifyWith cnfEasy (\x y -> assert ((delay 0 $ x + y) === adderSeqTVecBitDelay @2 x y) "d.+ === astv")
-  verifyWith cnfHard (\x y -> assert ((delay 0 $ adderSeqUnrollBit @2 x y) === adderSeqTVecBitDelay @2 x y) "d.asu === astv (too hard)")
-  verifyWith cnfEasy (\x -> assert ((SVec.head $ f x) === 1) "unroll . slowdown === map // head")
-  verifyWith cnfEasy (\x -> assert ((SVec.last $ f x) === 1) "unroll . slowdown === map // last")
-  verifyWith cnfHard (\x -> assert ((SVec.head $ f x, SVec.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last (too hard)")
+  verifyWith cnfEasy (\x y -> assert ((delay 0 $ x + y) === adderDelaySeqTVecBit @2 x y) "d.+ === astv")
+  verifyWith cnfHard (\x y -> assert ((delay 0 $ adderSeqUnrollBit @2 x y) === adderDelaySeqTVecBit @2 x y) "d.asu === astv (too hard)")
+  verifyWith cnfEasy (\x -> assert ((V.head $ f x) === 1) "unroll . slowdown === map // head")
+  verifyWith cnfEasy (\x -> assert ((V.last $ f x) === 1) "unroll . slowdown === map // last")
+  verifyWith cnfHard (\x -> assert ((V.head $ f x, V.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last (too hard)")
   where
     cnfEasy = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
     cnfHard = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = True, userConfIncreasePeriod = 4 } }
     cnfWrite = dfltVerifyConf { verifyConfMode = Induction (fixedDepth 2) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
-    f x = SVec.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (SVec.map (adderSeqN 2) x)
+    f x = V.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (V.map (adderSeqN 2) x)
