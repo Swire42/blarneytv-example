@@ -151,6 +151,78 @@ test2 a b = fromBitList [s0, s1]
     (c2, s1) = fullAdder a1 b1 c1
     c0 = 0
 
+test3 :: Bit 2 -> Bit 2 -> Bit 2
+test3 a b = fromBitList [s0, s1]
+  where
+    [a0, a1] = toBitList a
+    [b0, b1] = toBitList b
+    (c1, s0) = fullAdder a0 b0 c0
+    (c2, s1) = fullAdder a1 b1 c1
+    c0 = delay 0 0
+
+test4 :: Bit 2 -> Bit 2 -> Bit 2
+test4 a b = fromBitList [out0, out1]
+  where
+    [a0, a1] = toBitList a
+    [b0, b1] = toBitList b
+    (out0, cOut0) = fullAdder' (cIn0, (a0, b0))
+    (out1, cOut1) = fullAdder' (cIn1, (a1, b1))
+    cNext0       = reset0 ? (0, cOut0)
+    cNext1       = reset1 ? (0, cOut1)
+    cIn0         = delay 0 cNext1
+    cIn1         = cNext0
+    reset0 = delay 0 tmp1
+    reset1 = tmp0
+    tmp0 = delay 1 reset1
+    tmp1 = reset0
+
+test_seq :: (Bit 1, Bit 1) -> (Bit 1, Bit 1) -> (Bit 1, Bit 1)
+test_seq (a0, a1) (b0, b1) = (out0, out1)
+  where
+    (out0, cOut0) = fullAdder' (cIn0, (a0, b0))
+    (out1, cOut1) = fullAdder' (cIn1, (a1, b1))
+    cNext0       = reset0 ? (0, cOut0)
+    cNext1       = reset1 ? (0, cOut1)
+    cIn0         = delay 0 cNext1
+    cIn1         = cNext0
+    reset0 = delay 0 reset0
+    reset1 = delay 1 reset1
+
+test_comb :: (Bit 1, Bit 1) -> (Bit 1, Bit 1) -> (Bit 1, Bit 1)
+test_comb (a0, a1) (b0, b1) = (out0, out1)
+  where
+    (out0, cOut0) = fullAdder' (0, (a0, b0))
+    (out1, cOut1) = fullAdder' (cOut0, (a1, b1))
+
+test5 :: Bit 2 -> Bit 2 -> Bit 2
+test5 a b = fromBitList [out0, out1]
+  where
+    [a0, a1] = toBitList a
+    [b0, b1] = toBitList b
+    (out0, cOut0) = fullAdder' (cIn0, (a0, b0))
+    (out1, cOut1) = fullAdder' (cIn1, (a1, b1))
+    cNext0       = reset0 ? (0, cOut0)
+    cNext1       = reset1 ? (1, 0)
+    cIn0         = delay 0 cNext1
+    cIn1         = cNext0
+    reset0 = cst0 ()
+    reset1 = cst0 ()
+
+cst0 :: () -> Bit 1
+cst0 () = let x = delay 0 x in x
+
+test6 :: Int -> () -> Bit 1
+test6 0 () = let x = delay 0 x .^. (delay 0 $ delay 0 x) in x
+test6 n () = ((test6 (n-1) ()) ? (test6 (n-1) (), test6 (n-1) ()))
+
+--adderSeq x y = s
+--  where cIn = delay 0 cOut
+--        (cOut, s) = fullAdder x y cIn
+--    reset = puls n ()
+--    cIn         = delay 0 cNext
+--    cNext       = reset ? (0, cOut)
+--    (out, cOut) = fullAdder (cIn, (a, b))
+
 notId :: Bit 1 -> Bit 1
 notId x = s
   where
@@ -207,6 +279,11 @@ main = do
   --writeSMTScript cnfWrite (\x -> assert ((notId x) === x) "notId === id") "prop" smtDir
   --writeSMTScript cnfWrite (\x y -> assert (((delay 0 $ adderSeqUnrollBit @2 x y) === (delay 0 $ x + y))) "Inner") "inner" smtDir
 
+  verifyWith cnfEasy (\x y -> assert (((test_comb x y) === (test_seq x y))) "test_comb === test_seq")
+  verifyWith cnfEasy (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_comb === test_comb")
+  verifyWith cnfEasy (\x y -> assert ((((delay 0 *** delay 0) $ test_comb x y) === ((delay 0 *** delay 0) $ test_seq x y))) "delay . test_comb === delay . test_seq")
+  verifyWith cnfEasy (assert (((delay 0 (test6 2 ())) === (delay 0 (test6 2 ())))) "test6: inner delays")
+  verifyWith cnfEasy (\x y -> assert (((delay 0 (test4 x y)) === (delay 0 (x + y)))) "test4: inner delays")
   verifyWith cnfEasy (\x -> assert ((notId x) === x) "notId === id")
   verifyWith cnfEasy (\x y -> assert (adder @16 x y === x + y) "adder === +")
   verifyWith cnfEasy (\x y -> assert (adderSeqUnrollBit @16 x y === x + y) "adderSeqUnrollBit === +")
