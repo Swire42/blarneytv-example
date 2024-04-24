@@ -2,13 +2,6 @@ import System.Directory
 import System.Environment
 
 import Blarney
-import qualified Blarney.SList as SList
-import qualified Blarney.SVec as V
-import qualified Blarney.TVec as TVec
-import qualified Blarney.Batch as B
-import qualified Blarney.FakeRapid as R
-import Blarney.Retime
-import Blarney.ITranspose
 
 import Control.Arrow ((***))
 
@@ -16,8 +9,6 @@ import Data.IntMap.Lazy (IntMap)
 import qualified Data.IntMap.Lazy as IntMap
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
-
-type Vec = V.SVec
 
 -- | Half adder taking two bits and returning a tuple with the carry bit first
 --   and the sum second
@@ -124,18 +115,6 @@ rowSeqPeriod n circ inp = out
 adderSeqN :: Int -> (Bit 1, Bit 1) -> Bit 1
 adderSeqN n = rowSeqPeriod n fullAdder'
 
--- N-bit sequential adder
-adderSeqUnroll :: forall n. KnownNat n => Vec n (Bit 1) -> Vec n (Bit 1) -> Vec n (Bit 1)
-adderSeqUnroll a b = (V.unroll @n $ adderSeqN (valueOf @n)) $ V.zip a b
-
-adderSeqUnrollBit :: forall n. KnownNat n => Bit n -> Bit n -> Bit n
-adderSeqUnrollBit a b = itranspose $ adderSeqUnroll @n (itranspose a) (itranspose b)
-
-replace pos newVal list = take pos list ++ newVal : drop (pos+1) list
-
-adderSeqUnrollSlowdown :: forall m. KnownNat m => Int -> Vec m (Bit 1, Bit 1) -> Vec m (Bit 1)
-adderSeqUnrollSlowdown n = V.unroll $ slowdown (valueOf @m) $ adderSeqN n
-
 test1 :: Bit 1 -> Bit 1 -> Bit 1
 test1 a0 b0 = s0
   where
@@ -230,46 +209,6 @@ notId x = s
     p = delay 0 $ delay 1 p
     c = delay 0 (p .&. s)
 
-adderSeqTVec :: forall n. (KnownNat n, 1 <= n) => TVec.TVec n (Bit 1) -> TVec.TVec n (Bit 1) -> TVec.TVec n (Bit 1)
-adderSeqTVec a b = fst $ TVec.unzip $ TVec.scanReset (\(_, cIn) (a, b) -> fullAdder' (cIn, (a, b))) (TVec.replicate (0, 0)) $ TVec.zip a b
-
-adderDelaySeqTVecBit :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
-adderDelaySeqTVecBit a b = itranspose . TVec.collect (V.replicate 0) $ adderSeqTVec @n (TVec.sweep $ itranspose a) (TVec.sweep $ itranspose b)
-
------
-
-adderBatch :: (KnownNat n, 1 <= n) => B.Batch n (Bit 1, Bit 1) -> B.Batch n (Bit 1)
-adderBatch = B.scanReset fullAdder'' (B.wrap 0)
-
-adderBatchUnroll :: forall n. (KnownNat n, 1 <= n) => Vec n (Bit 1) -> Vec n (Bit 1) -> Vec n (Bit 1)
-adderBatchUnroll a b = B.unroll adderBatch (V.zip a b)
-
-adderBatchUnrollBit :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
-adderBatchUnrollBit a b = itranspose $ adderBatchUnroll @n (itranspose a) (itranspose b)
-
-adderDelayRapid :: forall n. (KnownNat n, 1 <= n) => Vec n (Bit 1) -> Vec n (Bit 1) -> Vec n (Bit 1)
-adderDelayRapid a b = R.collect zero $ R.clkMul (adderBatch @n) (R.sweep $ V.zip a b)
-
-adderDelayRapidBit :: forall n. (KnownNat n, 1 <= n) => Bit n -> Bit n -> Bit n
-adderDelayRapidBit a b = itranspose $ adderDelayRapid @n (itranspose a) (itranspose b)
-
-stateSize :: (Bits a, Bits b, KnownNat (SizeOf a)) => (a -> b) -> Int
-stateSize circ = sum $ fix $ aux rootBV IntSet.empty
- where
-  rootBV :: BV = toBV . pack $ circ $ unpack zero
-  rootID = bvInstId rootBV
-
-  aux :: BV -> IntSet -> IntMap Int -> IntMap Int
-  aux BV{bvPrim=prim, bvInputs=inputs, bvInstId=instId} iset imap =
-    if instId `IntSet.member` iset
-      then IntMap.empty
-      else
-        IntMap.unions $ IntMap.singleton instId (
-          case prim of
-            Register initVal w -> w
-            _ -> 0
-        ) : map (\x -> aux x (IntSet.insert instId iset) imap) inputs
-
 main :: IO ()
 main = do
   -- path to script output directory
@@ -278,32 +217,31 @@ main = do
   -- generate smt2 scripts
   --writeSMTScript cnfWrite (\x -> assert ((notId x) === x) "notId === id") "prop" smtDir
   --writeSMTScript cnfWrite (\x y -> assert (((delay 0 $ adderSeqUnrollBit @2 x y) === (delay 0 $ x + y))) "Inner") "inner" smtDir
+  --writeSMTScript dfltVerifyConf { verifyConfMode = Induction (fixedDepth 2) True } (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq") "slow_seqseq_2" smtDir
+  --writeSMTScript dfltVerifyConf { verifyConfMode = Induction (fixedDepth 3) True } (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq") "slow_seqseq_3" smtDir
+  --writeSMTScript dfltVerifyConf { verifyConfMode = Induction (fixedDepth 4) True } (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq") "slow_seqseq_4" smtDir
+  --writeSMTScript dfltVerifyConf { verifyConfMode = Induction (fixedDepth 4) True } (\x -> (assert ((notId x) === x) "notId === id") >> (assert ((notId x) === x) "notId === id, bis")) "bis" smtDir
 
-  verifyWith cnfEasy (\x y -> assert (((test_comb x y) === (test_seq x y))) "test_comb === test_seq")
-  verifyWith cnfEasy (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_comb === test_comb")
-  verifyWith cnfEasy (\x y -> assert ((((delay 0 *** delay 0) $ test_comb x y) === ((delay 0 *** delay 0) $ test_seq x y))) "delay . test_comb === delay . test_seq")
-  verifyWith cnfEasy (assert (((delay 0 (test6 2 ())) === (delay 0 (test6 2 ())))) "test6: inner delays")
-  verifyWith cnfEasy (\x y -> assert (((delay 0 (test4 x y)) === (delay 0 (x + y)))) "test4: inner delays")
-  verifyWith cnfEasy (\x -> assert ((notId x) === x) "notId === id")
-  verifyWith cnfEasy (\x y -> assert (adder @16 x y === x + y) "adder === +")
-  verifyWith cnfEasy (\x y -> assert (adderSeqUnrollBit @16 x y === x + y) "adderSeqUnrollBit === +")
-  verifyWith cnfEasy (\x y -> assert (adderDelaySeqTVecBit @2 x y === (delay 0 (x + y))) "adderDelaySeqTVecBit === delay . +")
-  verifyWith cnfEasy (\x y -> assert (adderBatchUnrollBit @16 x y === x + y) "adderBatchUnrollBit === +")
-  verifyWith cnfHard (\x y -> assert (adderDelayRapidBit @2 x y === (delay 0 (x + y))) "adderDelayRapidBit === + (too hard)")
-  verifyWith cnfEasy (\x y -> assert ((test2 x y) === (x + y)) "test2: no delays")
-  verifyWith cnfEasy (\x y -> assert (delay 1 ((test2 x y) === (x + y))) "test2: outer delay")
-  verifyWith cnfEasy (\x y -> assert (((delay 0 (test2 x y)) === (delay 0 (x + y)))) "test2: inner delays")
-  verifyWith cnfEasy (\x y -> assert ((adderSeqUnrollBit @2 x y) === (x + y)) "asu: no delays")
-  verifyWith cnfEasy (\x y -> assert (delay 1 ((adderSeqUnrollBit @2 x y) === (x + y))) "asu: outer delay")
-  verifyWith cnfHard (\x y -> assert ((delay 0 (adderSeqUnrollBit @2 x y)) === (delay 0 (x + y))) "asu: inner delays (too hard)")
-  verifyWith cnfEasy (\x y -> assert ((adderSeqUnrollBit @2 x y) === (x + y)) "asu === +")
-  verifyWith cnfEasy (\x y -> assert ((delay 0 $ x + y) === adderDelaySeqTVecBit @2 x y) "d.+ === astv")
-  verifyWith cnfHard (\x y -> assert ((delay 0 $ adderSeqUnrollBit @2 x y) === adderDelaySeqTVecBit @2 x y) "d.asu === astv (too hard)")
-  verifyWith cnfEasy (\x -> assert ((V.head $ f x) === 1) "unroll . slowdown === map // head")
-  verifyWith cnfEasy (\x -> assert ((V.last $ f x) === 1) "unroll . slowdown === map // last")
-  verifyWith cnfHard (\x -> assert ((V.head $ f x, V.last $ f x) === (1, 1)) "unroll . slowdown === map // head and last (too hard)")
+  --verifyWith cnfEasy (\x y -> assert (((test_comb x y) === (test_seq x y))) "test_comb === test_seq")
+  --verifyWith cnfEasy (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_comb === test_comb")
+  --verifyWith cnfEasy (\x y -> assert ((((delay 0 *** delay 0) $ test_comb x y) === ((delay 0 *** delay 0) $ test_seq x y))) "delay . test_comb === delay . test_seq")
+  --verifyWith cnfEasy (assert (((delay 0 (test6 2 ())) === (delay 0 (test6 2 ())))) "test6: inner delays")
+  --verifyWith cnfEasy (\x y -> assert (((delay 0 (test4 x y)) === (delay 0 (x + y)))) "test4: inner delays")
+  --verifyWith cnfEasy (\x -> (assert ((notId x) === x) "notId === id"))
+  --verifyWith cnfEasy (\x -> (assert ((notId x) === x) "notId === id") >> (assert ((notId x) === x) "notId === id, bis"))
+  --verifyWith cnfEasy (\x y -> assert (adder @16 x y === x + y) "adder === +")
+  --assertBoundedWhole write_screen 3
+  --verifyFixed VerifConf { restrictedStates = True, write = write_screen } (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_comb === test_seq") "sm"
+  --verifyOfflineFixed (verb, VerifConf { restrictedStates = True, write = write_nothing, giveModel = True }, FixedConf { depth = 4 }) (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq") "a" "Check"
+  --verifyLiveFixed (verb, vconfDefault, fconfCombinational) (\(x :: Bit 1) (y :: Bit 1) -> assert ((inv (x .|. y)) === ((inv x) .&. (inv y))) "De Morgan")
+  --verifyLiveIncremental cnfNew (assert (dontCare === (dontCare :: Bit 1)) "don't care === 0")
+  --verifyLiveFixed (verb, VerifConf { restrictedStates = True, write = write_nothing, giveModel = True }, FixedConf { depth = 4 }) (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq")
+  --verifyLiveIncremental cnfNew (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq")
+  --verifyLiveIncremental cnfNew (\x -> assert (((notId x) === (id x))) "notId === id")
   where
     cnfEasy = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
     cnfHard = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = True, userConfIncreasePeriod = 4 } }
-    cnfWrite = dfltVerifyConf { verifyConfMode = Induction (fixedDepth 2) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
-    f x = V.zipWith (===) (adderSeqUnrollSlowdown @2 2 x) (V.map (adderSeqN 2) x)
+    cnfWrite = dfltVerifyConf { verifyConfMode = Induction (fixedDepth 3) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
+
+    --verb = Verbose
+    --cnfNew = (verb, vconfDefault, iconfDefault)
