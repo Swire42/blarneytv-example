@@ -15,6 +15,10 @@ executable blarney-template-project
     , blarney
     , directory
     , containers
+    , ghc-typelits-natnormalise
+    , ghc-typelits-presburger
+    , ghc-typelits-extra
+    , ghc-typelits-knownnat
   default-language: GHC2021
   default-extensions:
     BlockArguments
@@ -35,6 +39,7 @@ executable blarney-template-project
     -fno-cse
     -fno-full-laziness
     -Wno-partial-type-signatures
+    -threaded
   if flag(enable-namer-plugin)
     build-depends:
       blarney-plugins-namer
