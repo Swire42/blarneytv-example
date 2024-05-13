@@ -17,6 +17,7 @@ import Blarney.Retime
 import Blarney.ITranspose
 import Blarney.Nat
 
+import Data.Tuple
 import Control.Arrow ((***))
 
 import Data.IntMap.Lazy (IntMap)
@@ -85,6 +86,81 @@ twoLevelAdderDelayed a b = castOut $ R.clkMul aux $ castIn a b
     aux = B.scanReset kernel (B.wrap 0)
     kernel cIn (a, b) = let (s, cOut) = rippleAdder cIn a b in (cOut, s)
 
+-----
+
+pair2vec :: (a, a) -> Vec 2 a
+pair2vec (x1, x2) = V.cons x1 $ V.singleton x2
+vec2pair :: Vec 2 a -> (a, a)
+vec2pair xs = (V.head xs, V.last xs)
+
+evens :: forall n a b. KnownNat n => ((a, a) -> (b, b)) -> Vec (2*n) a -> Vec (2*n) b
+evens f = V.concat . V.map (pair2vec . f . vec2pair) . V.unconcat @n @2
+
+parl :: forall n a b. KnownNat n => (Vec n a -> Vec n b) -> (Vec n a -> Vec n b) -> Vec (2*n) a -> Vec (2*n) b
+parl f g xs = V.append (f $ V.take xs) (g $ V.drop @(2*n) @n xs)
+
+two :: forall n a b. KnownNat n => (Vec n a -> Vec n b) -> Vec (2*n) a -> Vec (2*n) b
+two f = parl f f
+
+riffle :: forall n a. KnownNat n => Vec (2*n) a -> Vec (2*n) a
+riffle = V.concat @n @2 . itranspose . V.unconcat @2 @n
+
+unriffle :: forall n a. KnownNat n => Vec (2*n) a -> Vec (2*n) a
+unriffle = V.concat @2 @n . itranspose . V.unconcat @n @2
+
+ilv :: forall n a b. KnownNat n => (Vec n a -> Vec n b) -> Vec (2*n) a -> Vec (2*n) b
+ilv f = riffle . two f . unriffle
+
+bfly :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+bfly f = ifZero @n id aux
+  where
+    aux :: (1 <= n) => Vec (2^n) a -> Vec (2^n) a
+    aux = evens f . ilv (bfly f)
+
+alt :: forall n a b. KnownNat n => Vec (4*n) a -> Vec (4*n) a
+alt = V.concat @n @4 . V.map (parl id (evens swap)) . V.unconcat @n @4
+
+vee :: forall n a b. KnownNat n => (Vec (2*n) a -> Vec (2*n) b) -> Vec (4*n) a -> Vec (4*n) b
+vee f = alt . ilv f . alt
+
+vfly :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+vfly f = ifZero @n id (ifZero @(n-1) (evens f) (V.forceCast . aux @(n-2) . V.forceCast))
+  where
+    aux :: forall m. (KnownNat m) => Vec ((2^m)*4) a -> Vec ((2^m)*4) a
+    aux = evens @((2^m)*2) f . vee (vfly @(m+1) f)
+
+hrep :: Int -> (a -> a) -> (a -> a)
+hrep 0 f = f
+hrep n f = hrep (n-1) f . f
+
+--
+
+cmp :: (B1, B1) -> (B1, B1)
+cmp (x, y) = (x .&. y, x .|. y)
+
+sorted :: KnownNat n => Vec n B1 -> B1
+sorted = snd . V.foldr (\x (min, sorted) -> (x .&. min, sorted .&. ((inv x) .|. min))) (1, 1)
+
+sortB :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+sortB cmp = ifZero @n id aux
+  where
+    aux :: (1 <= n) => Vec (2^n) a -> Vec (2^n) a
+    aux = bfly cmp . parl (sortB cmp) (sortB $ swap . cmp)
+
+sortV :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+sortV cmp = hrep (valueOf @n) (vfly cmp)
+
+-----
+
+sortVRapid :: forall n a. (KnownNat n, Bits a, KnownNat (SizeOf a), 1 <= n) => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+sortVRapid cmp = V.last . R.collect zero . R.clkMul aux . R.replicate . B.wrap
+  where
+    aux :: B.Batch n (Vec (2^n) a) -> B.Batch n (Vec (2^n) a)
+    aux x = ret
+      where ret = (B.lift $ vfly cmp) (B.shiftReset x ret)
+
+-----
+
 main :: IO ()
 main = do
   -- path to script output directory
@@ -95,5 +171,8 @@ main = do
   verifyDefault (Info, vconfQuiet) (\x y -> assert (batchAdderUnroll @16 x y === builtinAdder x y) "batchAdderUnrollBit === builtinAdder")
   verifyDefault (Info, vconfQuiet) (\x y -> assert (rapidAdderDelayed @16 x y === (delay zero (builtinAdder x y))) "rapidAdderDelayedBit === builtinAdder")
   verifyDefault (Info, vconfQuiet) (\x y -> assert (twoLevelAdderDelayed @4 @4 x y === (delay zero (builtinAdder x y))) "twoLevelAdderDelayed === builtinAdder")
-  where
-    cnf = (Verbose, vconfDefault, iconfDefault)
+
+  verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortB cmp (x :: Vec 16 B1)) "sortB is sorted")
+  verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortV cmp (x :: Vec 16 B1)) "sortV is sorted")
+  verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortVRapid cmp (x :: Vec 8 B1)) "sortVRapid is sorted")
+  verifyDefault (Info, vconfQuiet) (\x -> assert ((delay zero $ sortV cmp x) === (sortVRapid cmp (x :: Vec 8 B1))) "delay . sortV === sortVRapid")
