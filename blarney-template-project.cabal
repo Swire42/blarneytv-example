@@ -35,6 +35,7 @@ executable blarney-template-project
     -fno-cse
     -fno-full-laziness
     -Wno-partial-type-signatures
+    -threaded
   if flag(enable-namer-plugin)
     build-depends:
       blarney-plugins-namer
