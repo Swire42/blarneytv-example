@@ -129,6 +129,18 @@ vfly f = ifZero @n id (ifZero @(n-1) (evens f) (V.forceCast . aux @(n-2) . V.for
     aux :: forall m. (KnownNat m) => Vec ((2^m)*4) a -> Vec ((2^m)*4) a
     aux = evens @((2^m)*2) f . vee (vfly @(m+1) f)
 
+que :: forall n a b. KnownNat n => (Vec (2*n) a -> Vec (2*n) b) -> Vec (4*n) a -> Vec (4*n) b
+que f = ilv riffle . two f . ilv unriffle
+
+mid :: forall n a b. (KnownNat n, 2 <= n) => (Vec (n-2) a -> Vec (n-2) a) -> Vec n a -> Vec n a
+mid f xs = V.cons (V.head xs) (V.append (f $ V.init $ V.tail xs) (V.singleton $ V.last xs))
+
+qfly :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+qfly f = ifZero @n id (ifZero @(n-1) (evens f) (V.forceCast . aux @(n-2) . V.forceCast))
+  where
+    aux :: forall m. (KnownNat m) => Vec ((2^m)*4) a -> Vec ((2^m)*4) a
+    aux = ifZero @((2^m)*4-1) undefined $ mid (evens @((2^m)*2-1) f) . que (qfly @(m+1) f)
+
 hrep :: Int -> (a -> a) -> (a -> a)
 hrep 0 f = f
 hrep n f = hrep (n-1) f . f
@@ -150,6 +162,9 @@ sortB cmp = ifZero @n id aux
 sortV :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
 sortV cmp = hrep (valueOf @n) (vfly cmp)
 
+sortQ :: forall n a. KnownNat n => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+sortQ cmp = hrep (valueOf @n) (qfly cmp)
+
 -----
 
 sortVRapid :: forall n a. (KnownNat n, Bits a, KnownNat (SizeOf a), 1 <= n) => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
@@ -158,6 +173,13 @@ sortVRapid cmp = V.last . R.collect zero . R.clkMul aux . R.replicate . B.wrap
     aux :: B.Batch n (Vec (2^n) a) -> B.Batch n (Vec (2^n) a)
     aux x = ret
       where ret = (B.lift $ vfly cmp) (B.shiftReset x ret)
+
+sortQRapid :: forall n a. (KnownNat n, Bits a, KnownNat (SizeOf a), 1 <= n) => ((a, a) -> (a, a)) -> Vec (2^n) a -> Vec (2^n) a
+sortQRapid cmp = V.last . R.collect zero . R.clkMul aux . R.replicate . B.wrap
+  where
+    aux :: B.Batch n (Vec (2^n) a) -> B.Batch n (Vec (2^n) a)
+    aux x = ret
+      where ret = (B.lift $ qfly cmp) (B.shiftReset x ret)
 
 -----
 
@@ -174,5 +196,10 @@ main = do
 
   verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortB cmp (x :: Vec 16 B1)) "sortB is sorted")
   verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortV cmp (x :: Vec 16 B1)) "sortV is sorted")
+  verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortQ cmp (x :: Vec 16 B1)) "sortQ is sorted")
   verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortVRapid cmp (x :: Vec 8 B1)) "sortVRapid is sorted")
+  verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortQRapid cmp (x :: Vec 8 B1)) "sortQRapid is sorted")
+  verifyDefault (Info, vconfQuiet) (\x -> assert ((sortB cmp x) === (sortV cmp (x :: Vec 8 B1))) "sortB === sortV")
+  verifyDefault (Info, vconfQuiet) (\x -> assert ((sortB cmp x) === (sortQ cmp (x :: Vec 8 B1))) "sortB === sortQ")
   verifyDefault (Info, vconfQuiet) (\x -> assert ((delay zero $ sortV cmp x) === (sortVRapid cmp (x :: Vec 8 B1))) "delay . sortV === sortVRapid")
+  verifyDefault (Info, vconfQuiet) (\x -> assert ((delay zero $ sortV cmp x) === (sortVRapid cmp (x :: Vec 8 B1))) "delay . sortQ === sortQRapid")
