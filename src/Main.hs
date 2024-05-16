@@ -77,8 +77,8 @@ rapidAdderDelayed a b = R.collect zero $ R.clkMul (batchAdder @n) (R.sweep $ V.z
 -----
 
 -- n*m-adder built using a single fast m-adder
-twoLevelAdderDelayed :: forall n m. (KnownNat n, 1 <= n, KnownNat m) => Vec (n*m) B1 -> Vec (n*m) B1 -> Vec (n*m) B1
-twoLevelAdderDelayed a b = castOut $ R.clkMul aux $ castIn a b
+lpgsAdderDelayed :: forall n m. (KnownNat n, 1 <= n, KnownNat m) => Vec (n*m) B1 -> Vec (n*m) B1 -> Vec (n*m) B1
+lpgsAdderDelayed a b = castOut $ R.clkMul aux $ castIn a b
   where
     castIn a b = R.sweep $ V.zip (V.unconcat @n @m a) (V.unconcat @n @m b)
     castOut s = V.concat $ R.collect zero s
@@ -192,7 +192,7 @@ main = do
   verifyDefault (Info, vconfQuiet) (\x y -> assert (rippleAdderSimple @16 x y === builtinAdder x y) "rippleAdder === builtinAdder")
   verifyDefault (Info, vconfQuiet) (\x y -> assert (batchAdderUnroll @16 x y === builtinAdder x y) "batchAdderUnrollBit === builtinAdder")
   verifyDefault (Info, vconfQuiet) (\x y -> assert (rapidAdderDelayed @16 x y === (delay zero (builtinAdder x y))) "rapidAdderDelayedBit === builtinAdder")
-  verifyDefault (Info, vconfQuiet) (\x y -> assert (twoLevelAdderDelayed @4 @4 x y === (delay zero (builtinAdder x y))) "twoLevelAdderDelayed === builtinAdder")
+  verifyDefault (Info, vconfQuiet) (\x y -> assert (lpgsAdderDelayed @4 @4 x y === (delay zero (builtinAdder x y))) "lpgsAdderDelayed === builtinAdder")
 
   verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortB cmp (x :: Vec 16 B1)) "sortB is sorted")
   verifyDefault (Info, vconfQuiet) (\x -> assert (sorted $ sortV cmp (x :: Vec 16 B1)) "sortV is sorted")
