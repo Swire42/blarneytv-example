@@ -90,6 +90,7 @@ main = do
   verifyLiveIncremental cnf (\(x :: Bit 1) -> assert (delay 0 x === delay dontCare x) "don't care reg 1 (Falsifiable)")
   verifyLiveIncremental cnf (\(x :: Bit 1) -> assert (delay dontCare x === delay dontCare x) "don't care reg 2 (Falsifiable)")
   verifyLiveIncremental cnf (\(x :: Bit 1) -> assert (delay 1 x === (delay 1 0 .|. delay dontCare x)) "don't care reg 3 (Holds)")
+  verifyLiveIncremental cnf (\(x :: Bit 2) -> assert (delay ((0 :: Bit 1) # (dontCare :: Bit 1)) x === delay dontCare x) "don't care reg 4 (Falsifiable)")
   --verifyLiveFixed (verb, VerifConf { restrictedStates = True, write = write_nothing, giveModel = True }, FixedConf { depth = 4 }) (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq")
   --verifyLiveIncremental cnf (\x -> assert (((notId x) === (id x))) "notId === id")
   verifyLiveIncremental cnf (\x y -> assert (((adder2UnrollSeq x y) === (adder2UnrollSeq x y))) "aus === aus")
