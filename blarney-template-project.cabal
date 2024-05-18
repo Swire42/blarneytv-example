@@ -15,6 +15,10 @@ executable blarney-template-project
     , blarney
     , directory
     , containers
+    , ghc-typelits-natnormalise
+    , ghc-typelits-presburger
+    , ghc-typelits-extra
+    , ghc-typelits-knownnat
   default-language: GHC2021
   default-extensions:
     BlockArguments
