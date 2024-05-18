@@ -30,19 +30,13 @@ propInner = \x -> assert (inner x) "inner"
 main :: IO ()
 main = do
   -- Safe-neighborhood k-induction, concurent, one-size-fits-all
+  -- Outer/SN-Default
   verifyDefault (Info, vconfQuiet) propOuter
+  -- Inner/SN-Default
   verifyDefault (Info, vconfQuiet) propInner
 
   -- Safe-neighborhood k-induction, fixed depth, single-threaded
+  -- Outer/SN-Fixed
   verifyLiveQIFixed (Info, vconfDefault, FixedConf { depth=1 }) propOuter
+  -- Inner/SN-Fixed
   verifyLiveQIFixed (Info, vconfDefault, FixedConf { depth=1 }) propInner
-
-  -- Loop-free k-induction, single-threaded, incremental
-  --verifyLiveIncremental (Info, vconfDefault, iconfDefault) propOuter
-  --verifyLiveIncremental (Info, vconfDefault, iconfDefault) propInner
-
-  -- Old verification backend, single-threaded, incremental
-  --verifyWith (dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }) propOuter
-  --verifyWith (dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }) propInner
-
-  return ()
