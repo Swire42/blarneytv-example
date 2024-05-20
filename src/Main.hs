@@ -84,24 +84,17 @@ main = do
   --verifyFixed VerifConf { restrictedStates = True, write = write_screen } (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_comb === test_seq") "sm"
   --verifyOfflineFixed (verb, VerifConf { restrictedStates = True, write = write_nothing, giveModel = True }, FixedConf { depth = 4 }) (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq") "a" "Check"
   --verifyLiveFixed (verb, vconfDefault, fconfCombinational) (\(x :: Bit 1) (y :: Bit 1) -> assert ((inv (x .|. y)) === ((inv x) .&. (inv y))) "De Morgan")
-  verifyLiveIncremental cnf (assert ((0 .&. dontCare) === inv (1 .|. dontCare :: Bit 1)) "don't care val 1 (Holds)")
-  verifyLiveIncremental cnf (assert (0 === (dontCare :: Bit 1)) "don't care val 2 (Falsifiable)")
-  verifyLiveIncremental cnf (assert (dontCare === (dontCare :: Bit 1)) "don't care val 3 (Falsifiable)")
-  verifyLiveIncremental cnf (\(x :: Bit 1) -> assert (delay 0 x === delay dontCare x) "don't care reg 1 (Falsifiable)")
-  verifyLiveIncremental cnf (\(x :: Bit 1) -> assert (delay dontCare x === delay dontCare x) "don't care reg 2 (Falsifiable)")
-  verifyLiveIncremental cnf (\(x :: Bit 1) -> assert (delay 1 x === (delay 1 0 .|. delay dontCare x)) "don't care reg 3 (Holds)")
-  verifyLiveIncremental cnf (\(x :: Bit 2) -> assert (delay ((0 :: Bit 1) # (dontCare :: Bit 1)) x === delay dontCare x) "don't care reg 4 (Falsifiable)")
+  checkAuto Info (assert ((0 .&. dontCare) === inv (1 .|. dontCare :: Bit 1)) "don't care val 1 (Holds)")
+  checkAuto Info (assert (0 === (dontCare :: Bit 1)) "don't care val 2 (Falsifiable)")
+  checkAuto Info (assert (dontCare === (dontCare :: Bit 1)) "don't care val 3 (Falsifiable)")
+  checkAuto Info (\(x :: Bit 1) -> assert (delay 0 x === delay dontCare x) "don't care reg 1 (Falsifiable)")
+  checkAuto Info (\(x :: Bit 1) -> assert (delay dontCare x === delay dontCare x) "don't care reg 2 (Falsifiable)")
+  checkAuto Info (\(x :: Bit 1) -> assert (delay 1 x === (delay 1 0 .|. delay dontCare x)) "don't care reg 3 (Holds)")
+  checkAuto Info (\(x :: Bit 2) -> assert (delay ((0 :: Bit 1) # (dontCare :: Bit 1)) x === delay dontCare x) "don't care reg 4 (Falsifiable)")
   --verifyLiveFixed (verb, VerifConf { restrictedStates = True, write = write_nothing, giveModel = True }, FixedConf { depth = 4 }) (\x y -> assert (((test_seq x y) === (test_seq x y))) "test_seq === test_seq")
-  --verifyLiveIncremental cnf (\x -> assert (((notId x) === (id x))) "notId === id")
-  verifyLiveIncremental cnf (\x y -> assert (((adder2UnrollSeq x y) === (adder2UnrollSeq x y))) "aus === aus")
+  --checkAuto Info (\x -> assert (((notId x) === (id x))) "notId === id")
+  checkAuto Info (\x y -> assert (((adder2UnrollSeq x y) === (adder2UnrollSeq x y))) "aus === aus")
   --verifyLiveFixed (Verbose, vconfDefault, FixedConf { depth = 4 }) ausEqAus
   --verifyWith (dfltVerifyConf { verifyConfMode = Induction (fixedDepth 4) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }) ausEqAus
   --verifyWith cnfEasy prop_brokenAddSeq
-  verifyLiveIncremental cnf prop_brokenAddSeq
-  where
-    cnfEasy = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
-    cnfHard = dfltVerifyConf { verifyConfMode = Induction (IncreaseFrom 1) True, verifyConfUser = dfltUserConf { userConfInteractive = True, userConfIncreasePeriod = 4 } }
-    cnfWrite = dfltVerifyConf { verifyConfMode = Induction (fixedDepth 3) True, verifyConfUser = dfltUserConf { userConfInteractive = False } }
-
-    verb = Info
-    cnf = (verb, vconfDefault, iconfDefault)
+  checkAuto Info prop_brokenAddSeq
