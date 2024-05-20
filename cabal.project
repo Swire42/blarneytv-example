@@ -1,10 +1,5 @@
 packages: .
-
-source-repository-package
-  type: git
-  location: https://github.com/Swire42/blarneytv.git
-  tag: 7b47a424c5fc347bd56e662e1f914ab14240a725
-  subdir: . Haskell/BlarneyPlugins/Namer/
+          /data/swire/Work/Chalmers/blarneytv
 
 -- Enable the namer plugin here
 --package blarney
