@@ -31,12 +31,12 @@ main :: IO ()
 main = do
   -- Safe-neighborhood k-induction, concurent, one-size-fits-all
   -- Outer/SN-Default
-  verifyDefault (Info, vconfQuiet) propOuter
+  checkAuto Info propOuter
   -- Inner/SN-Default
-  verifyDefault (Info, vconfQuiet) propInner
+  checkAuto Info propInner
 
   -- Safe-neighborhood k-induction, fixed depth, single-threaded
   -- Outer/SN-Fixed
-  verifyLiveQIFixed (Info, vconfDefault, FixedConf { depth=1 }) propOuter
+  checkFixed 1 Info propOuter
   -- Inner/SN-Fixed
-  verifyLiveQIFixed (Info, vconfDefault, FixedConf { depth=1 }) propInner
+  checkFixed 1 Info propInner
